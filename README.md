@@ -1,36 +1,47 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# TaleemLink (local-first prototype)
 
-## Getting Started
+TaleemLink is a Next.js 16.4.2 / React 19.3.0 education workspace prototype. It is **not** currently a production-secure, multi-user, synchronized or fully offline learning platform.
 
-First, run the development server:
+## Requirements and launch
+
+Use Node.js 22 and an environment with access to the npm package registry:
 
 ```bash
+npm ci
+npm test
+npm run lint
+npm run build
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open `http://localhost:3000`. `npm test` is available without npm installation. In the project environment, dependency installation is unavailable, so lint and the Next.js production build cannot yet be verified. Browser behavior also requires manual testing on a machine with the dependencies installed.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## Current source capabilities (browser verification pending)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Student workspace and a labeled **Teacher preview** (these share the same local data; no accounts or permissions).
+- Study stream/level dropdowns, local lessons and notes metadata, IndexedDB file attachments, search, lesson completion.
+- Local assignment creation **and editing**, answer submission, preview teacher review/marks and MCQ quizzes; deletion asks for confirmation and clears linked local records.
+- Study session planning, editing, overlap checking and completion markers; **session duration is not measured study time**.
+- Subject lesson completion computed from real saved resources and deduplicated completion IDs.
+- Validated versioned `localStorage` records, recovery banner on corrupted storage and JSON record export.
+- Confirmed deletion for assignments, lessons (including IndexedDB attachments), study sessions, and quizzes (including local attempts).
+- Dialog Escape-key closing, Tab focus containment and mobile-safe record actions.
+- A storage conflict warning pauses writes when another tab changes the saved records; reload to get the current snapshot.
 
-## Learn More
+## Data persistence and recovery
 
-To learn more about Next.js, take a look at the following resources:
+- Learning records: browser `localStorage` key `taleemlink-local-v2`, saved with `schemaVersion: 1`; compatible legacy records from the old key load when valid.
+- Attachment blobs: IndexedDB database `taleemlink-materials-v1` in the current browser profile.
+- Storage writes wait until initial data has been read. If saved records fail validation, existing stored bytes are preserved and further writes are paused until intentional reset.
+- **Export records** downloads the saved JSON only, which can contain private learning information. **File attachments are excluded. This export is not a complete portable backup, and no import tool exists yet.** Keep the exported file private. Reset permanently deletes both records and local lesson attachments.
+- Browser storage can still be removed, blocked, exhausted, or evicted. Data is not automatically transferred between browsers or devices.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Still needed
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Full student profiles, flexible subjects and levels, complete teacher/student permissions, lesson metadata editing, portable attachment backup/import, realistic study-time tracking, stronger quiz authoring/results, real browser testing, PWA/offline service worker, internationalization, server authentication, online database, authorized synchronization and Android application.
 
-## Deploy on Vercel
+Read [`AUDIT.md`](AUDIT.md) for source-grounded status of every major feature, actual command/test results, risks and next-phase priorities.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Phase B delivery
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Read [`PHASE-B-REPORT.md`](PHASE-B-REPORT.md) for implemented changes, risks, automated checks, and the browser acceptance checklist. Browser data shared between Teacher preview and Student is only for prototype demonstration.
