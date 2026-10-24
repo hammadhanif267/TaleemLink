@@ -1,3 +1,4 @@
+import { validateStoredProfile, fromLegacyPreferences } from "./profile.mjs";
 /** Browser-local record validation and persistence. No server or multi-user security. */
 export const STORAGE_KEY = "taleemlink-local-v2";
 export const SCHEMA_VERSION = 1;
@@ -14,7 +15,7 @@ export function validateRecords(value) {
   if (value.schemaVersion !== undefined && value.schemaVersion !== SCHEMA_VERSION) {
     throw new Error("Saved learning data uses an unsupported format version.");
   }
-  if (!Object.keys(value).some((key) => ["tasks", "submissions", "studySessions", "lessons", "lessonDone", "quizzes", "quizResults", "studyTrack", "studyLevel"].includes(key))) {
+  if (!Object.keys(value).some((key) => ["tasks", "submissions", "studySessions", "lessons", "lessonDone", "quizzes", "quizResults", "studyTrack", "studyLevel", "profile"].includes(key))) {
     throw new Error("Saved learning data does not contain any recognizable records. Original data was not overwritten.");
   }
   const fields = {
@@ -35,6 +36,7 @@ export function validateRecords(value) {
       object(s) && string(s.text) && optionalString(s.status) && optionalString(s.grade) && optionalString(s.feedback)),
     studyTrack: optionalString(value.studyTrack),
     studyLevel: optionalString(value.studyLevel),
+    profile: value.profile === undefined || (() => { validateStoredProfile(value.profile); return true; })(),
   };
   const bad = Object.entries(fields).find(([, good]) => !good);
   if (bad) throw new Error(`Saved learning data has an invalid ${bad[0]} field. Original data was not overwritten.`);
@@ -46,6 +48,7 @@ export function validateRecords(value) {
     quizResults: value.quizResults ?? [],
     studyTrack: value.studyTrack ?? "Choose your stream",
     studyLevel: value.studyLevel ?? "Choose your level",
+    profile: value.profile ?? fromLegacyPreferences(value.studyTrack, value.studyLevel),
   };
 }
 

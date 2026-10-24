@@ -19,7 +19,7 @@ Then open `http://localhost:3000`. `npm test` is available without npm installat
 ## Current source capabilities (browser verification pending)
 
 - Student workspace and a labeled **Teacher preview** (these share the same local data; no accounts or permissions).
-- Study stream/level dropdowns, local lessons and notes metadata, IndexedDB file attachments, search, lesson completion.
+- Full local learner profile (education level, programme, subject preferences, daily target, goals), custom subjects, My subjects directory; local lessons and notes metadata, IndexedDB file attachments, search, lesson completion.
 - Local assignment creation **and editing**, answer submission, preview teacher review/marks and MCQ quizzes; deletion asks for confirmation and clears linked local records.
 - Study session planning, editing, overlap checking and completion markers; **session duration is not measured study time**.
 - Subject lesson completion computed from real saved resources and deduplicated completion IDs.
@@ -38,10 +38,22 @@ Then open `http://localhost:3000`. `npm test` is available without npm installat
 
 ## Still needed
 
-Full student profiles, flexible subjects and levels, complete teacher/student permissions, lesson metadata editing, portable attachment backup/import, realistic study-time tracking, stronger quiz authoring/results, real browser testing, PWA/offline service worker, internationalization, server authentication, online database, authorized synchronization and Android application.
+Production/browser verification of the new responsive light/dark UI, complete teacher/student permissions, lesson metadata editing, portable attachment backup/import, realistic study-time tracking, stronger quiz authoring/results, real browser testing, PWA/offline service worker, internationalization, server authentication, online database, authorized synchronization and Android application.
+
+Read [`PHASE-C-REPORT.md`](PHASE-C-REPORT.md) for what Phase C changed and what is still unverified.
 
 Read [`AUDIT.md`](AUDIT.md) for source-grounded status of every major feature, actual command/test results, risks and next-phase priorities.
 
 ## Phase B delivery
 
 Read [`PHASE-B-REPORT.md`](PHASE-B-REPORT.md) for implemented changes, risks, automated checks, and the browser acceptance checklist. Browser data shared between Teacher preview and Student is only for prototype demonstration.
+
+## Phase C: learner profile and design
+
+The new **My profile** page accepts different education systems, programmes, custom courses, country, institution, optional exam date and learning goals. The **My subjects** page shows progress only from saved lessons. Previously saved study stream/level preferences are safely interpreted on first load; older data is not deleted. Profile and other learning records are stored in `taleemlink-local-v2` on this browser.
+
+The moon/sun button in the top header switches between monochrome **light and dark themes**. This preference is stored separately under `taleemlink-theme` and is not included in the record JSON export. On narrow screens, use the menu icon at the top left to open the navigation drawer.
+
+Typography uses the existing Geist setup with system fallbacks; icons are lightweight inline SVGs. There is no new UI icon package or cloud account dependency. User-selected interface language is a saved preference only, not an implemented translation.
+
+See [`PHASE-C-REPORT.md`](PHASE-C-REPORT.md) for the full change list, testing status, and browser verification checklist.
