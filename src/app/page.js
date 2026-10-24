@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import AppIcon from "../components/AppIcon";
 import ProfileEditor from "../components/ProfileEditor";
+import LearningDashboard from "../components/LearningDashboard";
+import { dashboardSnapshot, localDateKey } from "../lib/dashboard.mjs";
 import { DEFAULT_PROFILE, fromLegacyPreferences, appearancePreference, SUBJECT_CATALOGUE } from "../lib/profile.mjs";
 import { validateAssignmentDraft, validateStudySessionDraft, sortedSessions, updateEditedRecord } from "../lib/workflows.mjs";
 import { STORAGE_KEY, readLocalRecords, writeLocalRecords, subjectProgress, assignmentStats, validateAttachment } from "../lib/local-records.mjs";
@@ -92,6 +94,7 @@ export default function Home() {
   const [profile, setProfile] = useState({ ...DEFAULT_PROFILE });
   const [theme, setTheme] = useState("light");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [todayKey, setTodayKey] = useState("");
   const [active, setActive] = useState("overview");
   const [tasks, setTasks] = useState(initialTasks);
   const [studySessions, setStudySessions] = useState([]);
@@ -162,6 +165,13 @@ export default function Home() {
     try { localStorage.setItem("taleemlink-theme", theme); } catch { /* Style preference may be session-only. */ }
   }, [theme]);
   useEffect(() => {
+    const refreshLocalDate = () => setTodayKey(localDateKey(new Date()));
+    refreshLocalDate();
+    document.addEventListener("visibilitychange", refreshLocalDate);
+    window.addEventListener("focus", refreshLocalDate);
+    return () => { document.removeEventListener("visibilitychange", refreshLocalDate); window.removeEventListener("focus", refreshLocalDate); };
+  }, []);
+  useEffect(() => {
     if (!menuOpen) return;
     const onKey = (event) => { if (event.key === "Escape") setMenuOpen(false); };
     window.addEventListener("keydown", onKey);
@@ -226,6 +236,7 @@ export default function Home() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  const dashboard = useMemo(() => dashboardSnapshot({ tasks, submissions, lessons, lessonDone, quizzes, quizResults, studySessions }, todayKey), [tasks, submissions, lessons, lessonDone, quizzes, quizResults, studySessions, todayKey]);
   const { completed, pending, completion } = assignmentStats(tasks, submissions);
   const quizAverage = quizResults.length ? Math.round(quizResults.reduce((sum, result) => sum + result.percent, 0) / quizResults.length) : null;
   const subjectNames = [...new Set([
@@ -251,7 +262,6 @@ export default function Home() {
     setQuizForm((current) => subjectChoices.includes(current.subject) ? current : { ...current, subject: first });
   }, [hydrated, subjectChoices]);
   const finishedLessons = lessons.filter((lesson) => lessonDone.includes(lesson.id)).length;
-  const lessonCompletion = lessons.length ? Math.round(finishedLessons * 100 / lessons.length) : 0;
 
   const filteredLessons = useMemo(() => lessons.filter((lesson) => (filter === "All subjects" || lesson.subject === filter) && `${lesson.title} ${lesson.subject} ${lesson.description}`.toLowerCase().includes(search.toLowerCase())), [lessons, filter, search]);
   const showNotice = (message) => { setNotice(message); window.setTimeout(() => setNotice(""), 4000); };
@@ -505,21 +515,7 @@ export default function Home() {
             <div className="page-title-row"><div><div className="eyebrow">YOUR LEARNING PATH</div><h1>My subjects</h1><p className="subheading">Your chosen courses, with progress calculated from actual saved lessons.</p></div><button className="secondary-button" onClick={() => setActive("profile")}><AppIcon name="pencil" size={16}/> Edit subjects</button></div>
             <div className="subject-directory">{allSubjects.length ? allSubjects.map((subject) => { const progress = subjectProgress(subject.name, lessons, lessonDone); return <article className="directory-card" key={subject.name}><div className="directory-icon"><AppIcon name={subject.icon} size={23}/></div><div><h3>{subject.name}</h3><p>{progress.total ? `${progress.finished} of ${progress.total} saved lessons completed` : "No lessons have been added yet"}</p><div className="directory-progress"><span style={{ width: `${progress.percent ?? 0}%` }} /></div></div><button className="directory-open" onClick={() => { setFilter(subject.name); setActive("lessons"); }} aria-label={`Open ${subject.name} lessons`}><AppIcon name="arrow-right" size={19}/></button></article>; }) : <div className="panel empty-profile-subjects"><AppIcon name="book-open" size={34}/><h2>No subjects selected</h2><p>Open your profile to add your first subjects. No sample subjects are counted as yours.</p><button className="primary-button" onClick={() => setActive("profile")}>Choose subjects <AppIcon name="arrow-right" size={16}/></button></div>}</div>
           </>}
-          {active === "overview" && <>
-            <div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> TALEEMLINK WORKSPACE</div><h1>Learning overview</h1><p className="subheading">Manage study materials, assignments and learning progress in one place.</p></div><button className="primary-button" onClick={() => { setActive("assignments"); if (role === "teacher") openNewTask(); }}><Icon>＋</Icon>{role === "teacher" ? "Create assignment" : "View assignments"}</button></div>
-            <div className="hero-banner"><div className="hero-copy"><span className="hero-kicker">{role === "teacher" ? "YOUR CLASSROOM, AT A GLANCE" : "YOUR NEXT CHAPTER STARTS HERE"}</span><h2>{role === "teacher" ? "Great teaching starts with a clear plan." : "Build your future, one lesson at a time."}</h2><p>{role === "teacher" ? "Keep lessons organised, set meaningful practice, and follow progress from one simple space." : "Your lessons, tasks and progress — all organised in one browser-local space."}</p><button className="hero-button" onClick={() => setActive(role === "teacher" ? "lessons" : "assignments")}>{role === "teacher" ? "Manage learning materials" : "Continue learning"}<Icon>↗</Icon></button></div><div className="hero-art" aria-hidden="true"><div className="art-sun" /><div className="art-book art-book-back" /><div className="art-book art-book-front"><div /><div /><div /></div><div className="art-pencil" /><div className="art-spark spark-one">✦</div><div className="art-spark spark-two">✧</div><div className="art-plant"><i /><i /><i /><b /></div></div><div className="hero-footnote"><span><Icon>✓</Icon> Learn at your own pace</span><span><Icon>⌁</Icon> Browser-local study records</span></div></div>
-            <section className="panel profile-overview-card">
-              <div className="profile-overview-icon"><AppIcon name="graduation" size={24}/></div>
-              <div><h3>{profile.displayName ? `${profile.displayName}’s learning pathway` : "Build your learner profile"}</h3><p>{profile.displayName ? [profile.educationLevel, profile.programme, profile.gradeYear].filter(Boolean).join(" · ") : "Add your education level, programme, subjects and study target to personalize this workspace."}</p>
-                <span className="profile-overview-meta">{profile.subjects.length} selected subjects · {profile.dailyTarget} min daily target</span></div>
-              <button className="secondary-button" onClick={() => setActive("profile")}>{profile.displayName ? "Edit profile" : "Set up profile"}<Icon>→</Icon></button>
-            </section>
-            <div className="section-heading"><div><h2>Your learning snapshot</h2><p>A little progress adds up to a lot.</p></div><button className="text-button" onClick={() => setActive("progress")}>View full progress <Icon>→</Icon></button></div>
-            <div className="stats-grid"><article className="stat-card"><div className="stat-top"><span className="stat-icon lilac"><Icon>▤</Icon></span><span className="stat-trend">Saved locally</span></div><div className="stat-value">{lessons.length.toString().padStart(2, "0")}<span> lessons</span></div><p>Learning materials ready</p><div className="mini-progress"><i style={{ width: `${lessonCompletion}%` }} /></div></article><article className="stat-card"><div className="stat-top"><span className="stat-icon mint"><Icon>✓</Icon></span><span className="stat-trend">{completion}% done</span></div><div className="stat-value">{completed.toString().padStart(2, "0")}<span> tasks</span></div><p>Assignments completed</p><div className="mini-progress mint-progress"><i style={{ width: `${completion}%` }} /></div></article><article className="stat-card"><div className="stat-top"><span className="stat-icon peach"><Icon>◷</Icon></span><span className="stat-trend">Not completed</span></div><div className="stat-value">{pending.toString().padStart(2, "0")}<span> due</span></div><p>Tasks to focus on next</p><div className="stat-footer"><span className="tiny-dot" /> A manageable next step</div></article></div>
-            <div className="dashboard-grid"><section className="panel subject-panel"><div className="panel-heading"><div><h3>Browse subjects</h3><p>Choose a subject to find or organise learning materials.</p></div></div><div className="subject-list">{allSubjects.map((subject) => <button className="subject-row" key={subject.name} onClick={() => { setFilter(subject.name); setActive("lessons"); }}><span className={`subject-icon ${subject.color}`}><AppIcon name={subject.icon} size={18}/></span><span className="subject-info"><strong>{subject.name}</strong><small>Open subject library</small></span><Icon className="subject-chevron">›</Icon></button>)}{allSubjects.length === 0 && <div className="empty-state"><strong>No subjects yet</strong><p>Choose subjects in My profile to organize your learning.</p><button className="text-button" onClick={() => setActive("profile")}>Set up profile →</button></div>}</div></section><section className="panel tasks-panel"><div className="panel-heading"><div><h3>Up next</h3><p>Your next few tasks, all in one place.</p></div><button className="text-button compact" onClick={() => setActive("assignments")}>See all <Icon>→</Icon></button></div><div className="task-list">{tasks.filter((task) => !task.done && !submissions[task.id]?.submittedAt).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 3).map((task) => <div className="task-row" key={task.id}><button className="task-check" onClick={() => toggleTask(task.id)} aria-label={`Complete ${task.title}`} /><div className="task-info"><strong>{task.title}</strong><span>{task.subject} <i>·</i> Due {prettyDate(task.due)}</span></div><span className={`task-type ${task.type === "Practice" ? "type-practice" : ""}`}>{task.type}</span></div>)}{pending === 0 && <div className="empty-state"><span><AppIcon name="sparkles" size={24}/></span><strong>All caught up!</strong><p>{tasks.length ? "You’ve completed every assignment." : "There are no assignments yet."}</p></div>}</div><button className="add-task-link" onClick={() => { setActive("assignments"); if (role === "teacher") openNewTask(); }}><Icon>＋</Icon> {role === "teacher" ? "Add a new assignment" : "Review all assignments"}</button></section></div>
-            <div className="bottom-note"><div className="note-icon"><AppIcon name="sparkles" size={23}/></div><div><strong>Consistency beats cramming.</strong><p>Try a 25-minute focused session, then take a short break. You’ve got this.</p></div></div>
-          </>}
-
+          {active === "overview" && <LearningDashboard data={dashboard} profile={profile} role={role} today={todayKey} allSubjects={allSubjects} onNavigate={setActive} onCreateTask={() => { setActive("assignments"); openNewTask(); }} onOpenQuiz={(quizId) => { setActive("quizzes"); if (role === "student") { const quiz = quizzes.find((item) => String(item.id) === String(quizId)); if (quiz) { setSelectedQuiz(quiz); setQuizAnswers({}); } } }} />}
           {active === "lessons" && <>
             <div className="page-title-row"><div><div className="eyebrow"><span className="eyebrow-line" /> YOUR LEARNING LIBRARY</div><h1>Lessons & notes</h1><p className="subheading">Keep study materials organised in this browser.</p></div>{role === "teacher" && <button className="primary-button" onClick={() => setShowLessonForm(true)}><Icon>＋</Icon> Add learning material</button>}</div>
             <div className="library-toolbar"><label className="search-box"><Icon>⌕</Icon><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search lessons, notes or subjects…" /></label><select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter by subject"><option>All subjects</option>{subjectChoices.map((subject) => <option key={subject}>{subject}</option>)}</select></div>

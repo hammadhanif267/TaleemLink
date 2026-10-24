@@ -57,3 +57,11 @@ The moon/sun button in the top header switches between monochrome **light and da
 Typography uses the existing Geist setup with system fallbacks; icons are lightweight inline SVGs. There is no new UI icon package or cloud account dependency. User-selected interface language is a saved preference only, not an implemented translation.
 
 See [`PHASE-C-REPORT.md`](PHASE-C-REPORT.md) for the full change list, testing status, and browser verification checklist.
+
+## Phase D: personalized learning overview and theme contrast fix
+
+The overview now uses `src/lib/dashboard.mjs` to calculate upcoming/deadline assignments, today's study plan, lesson completion, quiz attempts and the selected learner pathway from saved data. No real study minutes are measured. Cards navigate to their corresponding existing pages, with explicit empty states for new learners.
+
+`src/app/phase-d.css` corrects assignment, quiz and planner statistic colors in both themes, including the unreadable white-on-white assignment numbers reported in Phase C. The new dashboard uses a responsive monochrome grid. There are no new runtime dependencies or storage-schema changes.
+
+Read [`PHASE-D-REPORT.md`](PHASE-D-REPORT.md) for the complete change list, 36 passing tests, limitations, and a browser acceptance checklist. **Production build and interactive browser behavior have not yet been verified in the development environment.**
