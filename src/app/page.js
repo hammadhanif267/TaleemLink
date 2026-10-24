@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import AppIcon from "../components/AppIcon";
 import ProfileEditor from "../components/ProfileEditor";
 import LearningDashboard from "../components/LearningDashboard";
+import MaterialLibrary from "../components/MaterialLibrary";
+import MaterialEditor from "../components/MaterialEditor";
+import MaterialReader from "../components/MaterialReader";
+import { cleanMaterialDraft, validateMaterialDraft, updateMaterial } from "../lib/materials.mjs";
 import { dashboardSnapshot, localDateKey } from "../lib/dashboard.mjs";
 import { DEFAULT_PROFILE, fromLegacyPreferences, appearancePreference, SUBJECT_CATALOGUE } from "../lib/profile.mjs";
 import { validateAssignmentDraft, validateStudySessionDraft, sortedSessions, updateEditedRecord } from "../lib/workflows.mjs";
@@ -38,6 +42,7 @@ function Icon({ children, className = "" }) { return <AppIcon name={children} cl
 
 function prettyDate(date) { const parsed = new Date(`${date}T12:00:00`); return Number.isNaN(parsed.getTime()) ? "Date not set" : parsed.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }
 function newId() { return crypto.randomUUID(); }
+function blankLessonForm(subject = "Mathematics") { return { title: "", subject, kind: "Notes + practice", length: "", description: "", chapter: "", topic: "", content: "", url: "" }; }
 
 // Large lesson files live in IndexedDB rather than localStorage, so PDFs and videos
 // do not quickly fill the browser's small text-storage quota.
@@ -113,6 +118,9 @@ export default function Home() {
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [showLessonForm, setShowLessonForm] = useState(false);
+  const [editingLessonId, setEditingLessonId] = useState(null);
+  const [readerLessonId, setReaderLessonId] = useState(null);
+  const [removeExistingFile, setRemoveExistingFile] = useState(false);
   const [showQuizForm, setShowQuizForm] = useState(false);
   const [quizzes, setQuizzes] = useState(starterQuizzes);
   const [quizResults, setQuizResults] = useState([]);
@@ -120,7 +128,7 @@ export default function Home() {
   const [quizAnswers, setQuizAnswers] = useState({});
   const [notice, setNotice] = useState("");
   const [taskForm, setTaskForm] = useState({ title: "", subject: "Mathematics", due: "", type: "Homework", detail: "" });
-  const [lessonForm, setLessonForm] = useState({ title: "", subject: "Mathematics", kind: "Notes + practice", length: "15 min", description: "" });
+  const [lessonForm, setLessonForm] = useState(blankLessonForm());
   const [lessonFile, setLessonFile] = useState(null);
   const [fileBusy, setFileBusy] = useState(false);
   const [deletingLessonId, setDeletingLessonId] = useState(null);
@@ -191,7 +199,7 @@ export default function Home() {
 
   // Manage keyboard navigation across all four dialog forms.
   useEffect(() => {
-    if (!showTaskForm && !showStudyForm && !showLessonForm && !showQuizForm) return;
+    if (!showTaskForm && !showStudyForm && !showLessonForm && !showQuizForm && readerLessonId === null) return;
     const previousFocus = document.activeElement;
     const dialog = document.querySelector('[role="dialog"][aria-modal="true"]');
     if (!dialog) return;
@@ -199,11 +207,14 @@ export default function Home() {
     first?.focus();
     const onKeyDown = (event) => {
       if (event.key === "Escape") {
+        if (fileBusy) return;
         event.preventDefault();
         setShowTaskForm(false); setEditingTaskId(null);
         setShowStudyForm(false); setEditingStudyId(null);
-        setShowLessonForm(false); setLessonFile(null);
+        setShowLessonForm(false); setLessonFile(null); setEditingLessonId(null); setRemoveExistingFile(false);
+        setReaderLessonId(null);
         setShowQuizForm(false);
+        setReaderLessonId(null);
         return;
       }
       if (event.key !== "Tab") return;
@@ -222,7 +233,7 @@ export default function Home() {
       document.removeEventListener("keydown", onKeyDown);
       if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [showTaskForm, showStudyForm, showLessonForm, showQuizForm]);
+  }, [showTaskForm, showStudyForm, showLessonForm, showQuizForm, readerLessonId, fileBusy]);
 
   // A second tab may edit the same browser-local data. Pause writes in this tab.
   useEffect(() => {
@@ -263,7 +274,6 @@ export default function Home() {
   }, [hydrated, subjectChoices]);
   const finishedLessons = lessons.filter((lesson) => lessonDone.includes(lesson.id)).length;
 
-  const filteredLessons = useMemo(() => lessons.filter((lesson) => (filter === "All subjects" || lesson.subject === filter) && `${lesson.title} ${lesson.subject} ${lesson.description}`.toLowerCase().includes(search.toLowerCase())), [lessons, filter, search]);
   const showNotice = (message) => { setNotice(message); window.setTimeout(() => setNotice(""), 4000); };
   function exportBrowserRecords() {
     try {
@@ -293,7 +303,7 @@ export default function Home() {
       setTasks([]); setSubmissions({}); setStudySessions([]); setLessons([]);
       setLessonDone([]); setQuizzes([]); setQuizResults([]);
       setStudyTrack("Choose your stream"); setStudyLevel("Choose your level"); setProfile({ ...DEFAULT_PROFILE });
-      setStorageIssue(""); setSaved(false);
+      setStorageIssue(""); setSaved(false); setReaderLessonId(null);
       showNotice("Local learning records and attachments reset.");
     } catch (error) { showNotice(error?.message || "Could not reset local data. Your records were not intentionally cleared."); }
   }
@@ -340,16 +350,49 @@ export default function Home() {
     setQuizResults((current) => current.filter((result) => result.quizId !== quiz.id));
     showNotice("Quiz and linked attempt history deleted.");
   }
+  function saveLessonSnapshot(nextLessons, nextDone = lessonDone) {
+    if (!hydrated || storageIssue) throw new Error("Local data is not ready for saving. Reload or export your original records first.");
+    // Persist metadata before deleting an existing IndexedDB blob. A failed write
+    // must leave both the original attachment and the original lesson intact.
+    writeLocalRecords(localStorage, { tasks, submissions, studySessions, lessons: nextLessons,
+      lessonDone: nextDone, quizzes, quizResults, studyTrack, studyLevel, profile });
+    setLessons(nextLessons);
+    setLessonDone(nextDone);
+    setSaved(true);
+  }
+  function openNewLesson() {
+    setEditingLessonId(null);
+    setLessonFile(null);
+    setRemoveExistingFile(false);
+    setLessonForm(blankLessonForm(subjectChoices[0] || "Mathematics"));
+    setShowLessonForm(true);
+  }
+  function editLesson(lesson) {
+    setEditingLessonId(lesson.id);
+    setRemoveExistingFile(false);
+    setLessonFile(null);
+    setLessonForm({ ...blankLessonForm(lesson.subject), ...cleanMaterialDraft(lesson) });
+    setShowLessonForm(true);
+  }
+  function closeLessonForm() {
+    if (fileBusy) return;
+    setShowLessonForm(false); setEditingLessonId(null); setLessonFile(null); setRemoveExistingFile(false);
+  }
   async function deleteLesson(lesson) {
-    if (deletingLessonId !== null) return;
+    if (deletingLessonId !== null || fileBusy) return;
     if (!window.confirm(`Delete learning material "${lesson.title}"${lesson.attachment ? " and its locally stored attachment" : ""}? Completion progress will also be removed. This cannot be undone.`)) return;
     setDeletingLessonId(lesson.id);
     try {
-      if (lesson.attachment?.id) await deleteMaterialFile(lesson.attachment.id);
-      setLessons((current) => current.filter((item) => item.id !== lesson.id));
-      setLessonDone((current) => current.filter((id) => id !== lesson.id));
-      showNotice("Learning material removed from this browser.");
-    } catch (error) { showNotice(error?.message || "Could not delete the attachment. Learning material was preserved."); }
+      const nextLessons = lessons.filter(item => item.id !== lesson.id);
+      const nextDone = lessonDone.filter(id => id !== lesson.id);
+      saveLessonSnapshot(nextLessons, nextDone);
+      if (readerLessonId === lesson.id) setReaderLessonId(null);
+      if (lesson.attachment?.id) {
+        try { await deleteMaterialFile(lesson.attachment.id); }
+        catch { showNotice("Lesson deleted, but file cleanup failed. The unused attachment may remain in browser storage."); return; }
+      }
+      showNotice("Learning material and its saved progress removed.");
+    } catch (error) { showNotice(error?.message || "Could not delete the material. Original records were kept."); }
     finally { setDeletingLessonId(null); }
   }
 
@@ -369,42 +412,57 @@ export default function Home() {
   }
   async function addLesson(event) {
     event.preventDefault();
-    if (!lessonForm.title.trim() || fileBusy) return;
+    if (fileBusy) return;
+    const editing = lessons.find(item => item.id === editingLessonId);
+    const keepExisting = Boolean(editing?.attachment && !removeExistingFile && !lessonFile);
+    const fields = cleanMaterialDraft(lessonForm);
+    const invalid = validateMaterialDraft(fields, { hasAttachment: Boolean(lessonFile || keepExisting) });
+    if (invalid) { showNotice(invalid); return; }
+    if (lessonFile) {
+      const error = validateAttachment(lessonFile);
+      if (error) { showNotice(error); return; }
+    }
     setFileBusy(true);
-    const id = newId();
+    let uploaded = null;
     try {
-      let attachment = null;
-      if (lessonFile) {
-        const error = validateAttachment(lessonFile);
-        if (error) { showNotice(error); return; }
-        attachment = await saveMaterialFile(lessonFile, `lesson-${id}`);
+      const id = editing?.id ?? newId();
+      if (lessonFile) uploaded = await saveMaterialFile(lessonFile, `lesson-${id}-${newId()}`);
+      const attachment = uploaded || (keepExisting ? editing.attachment : null);
+      const changes = { ...fields, attachment, icon: fields.kind.includes("Video") ? "▶" : "▤" };
+      const next = editing ? updateMaterial(lessons, editing.id, changes) : [{ ...changes, id }, ...lessons];
+      saveLessonSnapshot(next);
+      setShowLessonForm(false); setEditingLessonId(null); setLessonFile(null); setRemoveExistingFile(false);
+      if (editing?.attachment?.id && editing.attachment.id !== attachment?.id) {
+        try { await deleteMaterialFile(editing.attachment.id); }
+        catch { showNotice("Material saved, but the replaced attachment could not be cleaned up from browser storage."); return; }
       }
-      setLessons((current) => [{ ...lessonForm, id, attachment, icon: lessonForm.kind.includes("Video") ? "▶" : "▤" }, ...current]);
-      setLessonForm({ title: "", subject: "Mathematics", kind: "Notes + practice", length: "15 min", description: "" });
-      setLessonFile(null);
-      setShowLessonForm(false);
-      showNotice(attachment ? "Lesson file stored in this browser; lesson record queued for local save." : "Lesson added to your local library.");
+      showNotice(editing ? "Learning material updated on this device." : "Learning material added to your library.");
     } catch (error) {
-      showNotice(error?.message || "Could not save the file. Try a smaller file or another browser.");
+      if (uploaded?.id) { try { await deleteMaterialFile(uploaded.id); } catch { /* Orphan may remain; original record was not modified. */ } }
+      showNotice(error?.message || "Could not save this material. Existing records are preserved.");
     } finally { setFileBusy(false); }
   }
-  async function openLessonAttachment(lesson) {
-    if (!lesson.attachment?.id) {
-      showNotice("This starter lesson has no attached file yet. The teacher can add a PDF, image or video.");
-      return;
-    }
+  async function accessLessonAttachment(lesson, mode = "open") {
+    if (!lesson.attachment?.id) { showNotice("This lesson does not have an attached file."); return; }
+    // Reserve an open-tab synchronously to avoid popup blockers after IndexedDB I/O.
+    const preview = mode === "open" ? window.open("", "_blank") : null;
+    if (preview) preview.opener = null;
     try {
       const savedFile = await readMaterialFile(lesson.attachment.id);
       if (!savedFile?.blob) {
-        showNotice("This attachment is missing from this browser. Please upload it again.");
-        return;
+        preview?.close(); showNotice("Attachment missing in this browser. Edit the lesson to add it again."); return;
       }
       const url = URL.createObjectURL(savedFile.blob);
-      const link = document.createElement("a");
-      link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer";
-      link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (error) { showNotice(error?.message || "Could not open this attachment."); }
+      if (mode === "open" && preview) {
+        preview.location.href = url;
+      } else {
+        const link = document.createElement("a");
+        link.href = url; link.download = savedFile.name || lesson.attachment.name;
+        document.body.appendChild(link); link.click(); link.remove();
+        if (mode === "open") showNotice("The browser blocked a new tab. Attachment downloaded instead.");
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
+    } catch (error) { preview?.close(); showNotice(error?.message || "Could not retrieve the attachment."); }
   }
   function addStudySession(event) {
     event.preventDefault();
@@ -516,11 +574,13 @@ export default function Home() {
             <div className="subject-directory">{allSubjects.length ? allSubjects.map((subject) => { const progress = subjectProgress(subject.name, lessons, lessonDone); return <article className="directory-card" key={subject.name}><div className="directory-icon"><AppIcon name={subject.icon} size={23}/></div><div><h3>{subject.name}</h3><p>{progress.total ? `${progress.finished} of ${progress.total} saved lessons completed` : "No lessons have been added yet"}</p><div className="directory-progress"><span style={{ width: `${progress.percent ?? 0}%` }} /></div></div><button className="directory-open" onClick={() => { setFilter(subject.name); setActive("lessons"); }} aria-label={`Open ${subject.name} lessons`}><AppIcon name="arrow-right" size={19}/></button></article>; }) : <div className="panel empty-profile-subjects"><AppIcon name="book-open" size={34}/><h2>No subjects selected</h2><p>Open your profile to add your first subjects. No sample subjects are counted as yours.</p><button className="primary-button" onClick={() => setActive("profile")}>Choose subjects <AppIcon name="arrow-right" size={16}/></button></div>}</div>
           </>}
           {active === "overview" && <LearningDashboard data={dashboard} profile={profile} role={role} today={todayKey} allSubjects={allSubjects} onNavigate={setActive} onCreateTask={() => { setActive("assignments"); openNewTask(); }} onOpenQuiz={(quizId) => { setActive("quizzes"); if (role === "student") { const quiz = quizzes.find((item) => String(item.id) === String(quizId)); if (quiz) { setSelectedQuiz(quiz); setQuizAnswers({}); } } }} />}
-          {active === "lessons" && <>
-            <div className="page-title-row"><div><div className="eyebrow"><span className="eyebrow-line" /> YOUR LEARNING LIBRARY</div><h1>Lessons & notes</h1><p className="subheading">Keep study materials organised in this browser.</p></div>{role === "teacher" && <button className="primary-button" onClick={() => setShowLessonForm(true)}><Icon>＋</Icon> Add learning material</button>}</div>
-            <div className="library-toolbar"><label className="search-box"><Icon>⌕</Icon><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search lessons, notes or subjects…" /></label><select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter by subject"><option>All subjects</option>{subjectChoices.map((subject) => <option key={subject}>{subject}</option>)}</select></div>
-            <div className="lesson-grid">{filteredLessons.map((lesson) => <article className="lesson-card" key={lesson.id}><div className={`lesson-art ${subjects.find((s) => s.name === lesson.subject)?.color || "violet"}`}><span className="lesson-art-mark"><AppIcon name={lesson.kind?.includes("Video") ? "play" : "book"} size={33}/></span><span className="lesson-art-subject">{lesson.subject}</span></div><div className="lesson-card-body"><div className="lesson-meta"><span>{lesson.kind}</span><span><Icon>◷</Icon> {lesson.length}</span></div>{lesson.attachment && <div className="attachment-chip" title={lesson.attachment.name}><span><AppIcon name="file" size={16}/></span><span>{lesson.attachment.name}</span><small>{formatBytes(lesson.attachment.size)}</small></div>}<h3>{lesson.title}</h3><p>{lesson.description || "Study this material, then mark it complete to keep your progress up to date."}</p><div className="lesson-card-actions"><button className={`secondary-button ${lessonDone.includes(lesson.id) ? "completed-button" : ""}`} onClick={() => { toggleLesson(lesson.id); showNotice(lessonDone.includes(lesson.id) ? "Lesson marked as not completed." : "Lesson marked complete."); }}>{lessonDone.includes(lesson.id) ? "✓ Completed" : "Mark complete"}</button><button className="small-icon-button" aria-label={lesson.attachment ? `Open ${lesson.attachment.name}` : `View ${lesson.title}`} title={lesson.attachment ? `Open ${lesson.attachment.name}` : "No file attached yet"} onClick={() => openLessonAttachment(lesson)}><AppIcon name={lesson.attachment ? "arrow-up-right" : "file"} size={17}/></button>{role === "teacher" && <button className="delete-button" disabled={deletingLessonId !== null} title="Delete lesson and attachment" aria-label={`Delete ${lesson.title}`} onClick={() => deleteLesson(lesson)}><AppIcon name="x" size={16}/></button>}</div></div></article>)}</div>{filteredLessons.length === 0 && <div className="panel empty-library"><span><AppIcon name="search" size={27}/></span><h3>No lessons found</h3><p>{lessons.length ? "Try a different search or subject filter." : "Use Teacher preview to add your first lesson or note."}</p><button className="secondary-button" onClick={() => { setSearch(""); setFilter("All subjects"); }}>Clear filters</button></div>}
-          </>}
+          {active === "lessons" && <MaterialLibrary
+            lessons={lessons} done={lessonDone} role={role} subjectChoices={subjectChoices}
+            filter={filter} setFilter={setFilter} search={search} setSearch={setSearch}
+            onCreate={openNewLesson} onEdit={editLesson} onDelete={deleteLesson}
+            onOpen={lesson => setReaderLessonId(lesson.id)}
+            onMark={toggleLesson} busy={fileBusy || deletingLessonId !== null || Boolean(storageIssue) || !hydrated}
+          />}
 
           {active === "assignments" && <>
             <div className="page-title-row"><div><div className="eyebrow"><span className="eyebrow-line" /> STAY ON TRACK</div><h1>Assignments</h1><p className="subheading">Clear tasks, realistic deadlines, steady progress.</p></div>{role === "teacher" && <button className="primary-button" onClick={openNewTask}><Icon>＋</Icon> Create assignment</button>}</div>
@@ -581,7 +641,20 @@ export default function Home() {
 
       {showStudyForm && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) closeStudyForm(); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="study-modal-title"><div className="modal-heading"><div><span className="eyebrow">BUILD A STEADY ROUTINE</span><h2 id="study-modal-title">{editingStudyId !== null ? "Edit study session" : "Plan a study session"}</h2><p>Choose a time and define one useful goal.</p></div><button className="modal-close" onClick={closeStudyForm} aria-label="Close"><AppIcon name="x" size={16}/></button></div><form onSubmit={addStudySession} className="form-stack"><label>Session title<input autoFocus required value={studyForm.title} onChange={(e) => setStudyForm({ ...studyForm, title: e.target.value })} placeholder="e.g. Revise chapter 3" /></label><label>Subject<select value={studyForm.subject} onChange={(e) => setStudyForm({ ...studyForm, subject: e.target.value })}>{subjectChoices.map((subject) => <option key={subject}>{subject}</option>)}</select></label><div className="form-two"><label>Date<input type="date" required value={studyForm.date} onChange={(e) => setStudyForm({ ...studyForm, date: e.target.value })} /></label><label>Start time<input type="time" required value={studyForm.start} onChange={(e) => setStudyForm({ ...studyForm, start: e.target.value })} /></label></div><label>Duration<select value={studyForm.duration} onChange={(e) => setStudyForm({ ...studyForm, duration: e.target.value })}><option value="15">15 minutes</option><option value="25">25 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option></select></label><label>Goal for this session (optional)<textarea rows="3" value={studyForm.goal} onChange={(e) => setStudyForm({ ...studyForm, goal: e.target.value })} placeholder="e.g. Solve five practice questions without looking at notes" /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={closeStudyForm}>Cancel</button><button type="submit" className="primary-button">{editingStudyId !== null ? "Update session" : "Save study session"} <Icon>→</Icon></button></div></form></section></div>}
       {showTaskForm && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) closeTaskForm(); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="task-modal-title"><div className="modal-heading"><div><span className="eyebrow">PLAN THE NEXT STEP</span><h2 id="task-modal-title">{editingTaskId !== null ? "Edit assignment" : "Create assignment"}</h2><p>Add clear instructions and a due date.</p></div><button className="modal-close" onClick={closeTaskForm} aria-label="Close"><AppIcon name="x" size={16}/></button></div><form onSubmit={addTask} className="form-stack"><label>Assignment title<input autoFocus required value={taskForm.title} onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })} placeholder="e.g. Chapter 2 practice questions" /></label><div className="form-two"><label>Subject<select value={taskForm.subject} onChange={(e) => setTaskForm({ ...taskForm, subject: e.target.value })}>{subjectChoices.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>Type<select value={taskForm.type} onChange={(e) => setTaskForm({ ...taskForm, type: e.target.value })}><option>Homework</option><option>Practice</option><option>Reading</option><option>Quiz</option></select></label></div><label>Due date<input type="date" required value={taskForm.due} onChange={(e) => setTaskForm({ ...taskForm, due: e.target.value })} /></label><label>Instructions<textarea rows="3" value={taskForm.detail} onChange={(e) => setTaskForm({ ...taskForm, detail: e.target.value })} placeholder="What should the student do?" /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={closeTaskForm}>Cancel</button><button type="submit" className="primary-button">{editingTaskId !== null ? "Update assignment" : "Save assignment"} <Icon>→</Icon></button></div></form></section></div>}
-      {showLessonForm && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowLessonForm(false); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="lesson-modal-title"><div className="modal-heading"><div><span className="eyebrow">BUILD YOUR LIBRARY</span><h2 id="lesson-modal-title">Add learning material</h2><p>Add a lesson or note entry to your library.</p></div><button className="modal-close" onClick={() => setShowLessonForm(false)} aria-label="Close"><AppIcon name="x" size={16}/></button></div><form onSubmit={addLesson} className="form-stack"><label>Title<input autoFocus required value={lessonForm.title} onChange={(e) => setLessonForm({ ...lessonForm, title: e.target.value })} placeholder="e.g. Functions in C++" /></label><div className="form-two"><label>Subject<select value={lessonForm.subject} onChange={(e) => setLessonForm({ ...lessonForm, subject: e.target.value })}>{subjectChoices.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>Material type<select value={lessonForm.kind} onChange={(e) => setLessonForm({ ...lessonForm, kind: e.target.value })}><option>Notes + practice</option><option>Video lesson</option><option>Reading</option><option>PDF notes</option></select></label></div><label>Duration label<input value={lessonForm.length} onChange={(e) => setLessonForm({ ...lessonForm, length: e.target.value })} placeholder="e.g. 15 min" /></label><label>Short description<textarea rows="3" value={lessonForm.description} onChange={(e) => setLessonForm({ ...lessonForm, description: e.target.value })} placeholder="What will the student learn?" /></label><label>Attach a file (optional)<input type="file" accept=".pdf,.txt,.md,.png,.jpg,.jpeg,.webp,.mp4,.webm,.mov,.ppt,.pptx,.doc,.docx" onChange={(e) => setLessonFile(e.target.files?.[0] || null)} /><span className="field-help">PDF, notes, images, documents or videos · up to 150 MB. The file stays in this browser for offline use.</span>{lessonFile && <span className="selected-file"><span>▧</span> {lessonFile.name} · {formatBytes(lessonFile.size)} <button type="button" onClick={() => setLessonFile(null)} aria-label="Remove selected file"><AppIcon name="x" size={16}/></button></span>}</label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setShowLessonForm(false); setLessonFile(null); }}>Cancel</button><button type="submit" className="primary-button" disabled={fileBusy}>{fileBusy ? "Saving…" : "Save material"} <Icon>→</Icon></button></div></form></section></div>}
+      {showLessonForm && <MaterialEditor
+        form={lessonForm} setForm={setLessonForm} file={lessonFile} setFile={setLessonFile}
+        subjectChoices={subjectChoices} editing={editingLessonId !== null}
+        existing={lessons.find(item => item.id === editingLessonId)} busy={fileBusy}
+        removeExisting={removeExistingFile} setRemoveExisting={setRemoveExistingFile}
+        onSave={addLesson} onCancel={closeLessonForm}
+      />}
+      {readerLessonId !== null && lessons.some(item => item.id === readerLessonId) && <MaterialReader
+        lesson={lessons.find(item => item.id === readerLessonId)}
+        complete={lessonDone.includes(readerLessonId)}
+        onClose={() => setReaderLessonId(null)} onToggle={toggleLesson}
+        onOpenFile={lesson => accessLessonAttachment(lesson, "open")}
+        onDownload={lesson => accessLessonAttachment(lesson, "download")}
+      />}
       {showQuizForm && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowQuizForm(false); }}><section className="modal quiz-modal" role="dialog" aria-modal="true" aria-labelledby="quiz-modal-title"><div className="modal-heading"><div><span className="eyebrow">CHECK UNDERSTANDING</span><h2 id="quiz-modal-title">Create MCQ quiz</h2><p>Create a three-question quiz for practice.</p></div><button className="modal-close" onClick={() => setShowQuizForm(false)} aria-label="Close"><AppIcon name="x" size={16}/></button></div><form onSubmit={addQuiz} className="form-stack"><label>Quiz title<input autoFocus required value={quizForm.title} onChange={(e) => setQuizForm({ ...quizForm, title: e.target.value })} placeholder="e.g. C++ Chapter 1 revision" /></label><label>Subject<select value={quizForm.subject} onChange={(e) => setQuizForm({ ...quizForm, subject: e.target.value })}>{subjectChoices.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>Short instructions<textarea rows="2" value={quizForm.description} onChange={(e) => setQuizForm({ ...quizForm, description: e.target.value })} placeholder="What should the student revise?" /></label>{quizForm.questions.map((question, index) => <fieldset className="quiz-builder-question" key={index}><legend>Question {index + 1}</legend><label>Question text<input required value={question.prompt} onChange={(e) => updateQuizQuestion(index, "prompt", e.target.value)} placeholder="Write the question" /></label><div className="quiz-builder-options">{question.options.map((option, optionIndex) => <label key={optionIndex}>Option {String.fromCharCode(65 + optionIndex)}<input required value={option} onChange={(e) => updateQuizOption(index, optionIndex, e.target.value)} placeholder={`Answer ${String.fromCharCode(65 + optionIndex)}`} /></label>)}</div><label>Correct answer<select value={question.answer} onChange={(e) => updateQuizQuestion(index, "answer", e.target.value)}>{question.options.map((option, optionIndex) => <option value={String(optionIndex)} key={optionIndex}>{String.fromCharCode(65 + optionIndex)}{option.trim() ? ` — ${option}` : ""}</option>)}</select></label></fieldset>)}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowQuizForm(false)}>Cancel</button><button type="submit" className="primary-button">Save quiz <Icon>→</Icon></button></div></form></section></div>}
       {notice && <div className="toast" role="status"><span>✓</span>{notice}</div>}
     </main>

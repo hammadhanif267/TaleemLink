@@ -33,6 +33,7 @@ const definitions = {
   leaf:<><path d="M20 4C10 4 4 9 4 16a4 4 0 0 0 4 4c7 0 12-6 12-16zM4 20c3-5 8-9 12-11"/></>,
   flask:<><path d="M9 3h6M10 3v7L5 19a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3M8 16h8"/></>,
   pencil:<path d="m5 19 4-.7L20 7a2 2 0 0 0-3-3L6 15zM14 7l3 3"/>,
+  download:<><path d="M12 3v12m-4-4 4 4 4-4M4 17v4h16v-4"/></>,
   file:<><path d="M6 2h8l5 5v15H6zM14 2v5h5M9 13h7M9 17h7"/></>,
   play:<><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/></>,
   sparkles:<path d="m12 3 1.7 6.3L20 11l-6.3 1.7L12 19l-1.7-6.3L4 11l6.3-1.7zM20 18l.5 1.5L22 20l-1.5.5L20 22l-.5-1.5L18 20l1.5-.5z"/>,

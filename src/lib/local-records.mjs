@@ -8,6 +8,12 @@ const identifier = (value) => (typeof value === "string" && value.length > 0) ||
 const string = (value) => typeof value === "string";
 const recordList = (value, required) => Array.isArray(value) && value.every((item) => object(item) && identifier(item.id) && required.every((field) => string(item[field])));
 const optionalString = (value) => value === undefined || string(value);
+const validLesson = (item) => object(item) && identifier(item.id) && string(item.title) && string(item.subject) &&
+  ["kind", "length", "description", "chapter", "topic", "content", "url"].every((field) => optionalString(item[field])) &&
+  (item.attachment === undefined || item.attachment === null || (
+    object(item.attachment) && identifier(item.attachment.id) && string(item.attachment.name) &&
+    Number.isFinite(item.attachment.size) && item.attachment.size >= 0 && optionalString(item.attachment.type)
+  ));
 
 /** Reject incomplete or malformed data instead of silently replacing existing records. */
 export function validateRecords(value) {
@@ -21,7 +27,7 @@ export function validateRecords(value) {
   const fields = {
     tasks: recordList(value.tasks ?? [], ["title", "subject", "due"]),
     studySessions: recordList(value.studySessions ?? [], ["title", "subject", "date", "start"]),
-    lessons: recordList(value.lessons ?? [], ["title", "subject"]),
+    lessons: Array.isArray(value.lessons ?? []) && (value.lessons ?? []).every(validLesson),
     quizzes: Array.isArray(value.quizzes ?? []) && (value.quizzes ?? []).every((quiz) =>
       object(quiz) && identifier(quiz.id) && string(quiz.title) && string(quiz.subject) &&
       Array.isArray(quiz.questions) && quiz.questions.length > 0 && quiz.questions.every((q) =>
@@ -79,5 +85,8 @@ export function validateAttachment(file) {
   if (!/\.(pdf|txt|md|png|jpg|jpeg|webp|mp4|webm|mov|ppt|pptx|doc|docx)$/i.test(file.name)) return "This file type is not supported.";
   if (file.size === 0) return "Empty files cannot be attached.";
   if (file.size > 150 * 1024 * 1024) return "Please choose a file no larger than 150 MB.";
+  if (["text/html", "image/svg+xml", "application/javascript", "text/javascript", "application/x-msdownload"].includes(file.type)) {
+    return "The file content type is not allowed, even if its filename has a supported extension.";
+  }
   return null;
 }

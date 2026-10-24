@@ -65,3 +65,11 @@ The overview now uses `src/lib/dashboard.mjs` to calculate upcoming/deadline ass
 `src/app/phase-d.css` corrects assignment, quiz and planner statistic colors in both themes, including the unreadable white-on-white assignment numbers reported in Phase C. The new dashboard uses a responsive monochrome grid. There are no new runtime dependencies or storage-schema changes.
 
 Read [`PHASE-D-REPORT.md`](PHASE-D-REPORT.md) for the complete change list, 36 passing tests, limitations, and a browser acceptance checklist. **Production build and interactive browser behavior have not yet been verified in the development environment.**
+
+## Phase E: Lessons and learning-material management (local-first)
+
+Open **Lessons & notes**. In **Teacher preview**, create a lesson containing written material, an HTTP/HTTPS link, or an attachment. Optional chapter and topic fields help organize lessons. Edit existing lessons (including Phase D records), replace/remove an attached file, or delete a record and its completion status. In **Student** view, open the reader, open/download locally saved attachments, visit external links, and mark lessons complete. The library has keyword, subject, material-type, and chapter filters.
+
+**Storage:** Lesson metadata and written text remain in localStorage using the existing schema version; files use IndexedDB. The record JSON export **does not include files**. There is no remote publication, real user authorization, attachment synchronization, guaranteed offline page caching, or account separation. Switching Teacher preview/Student is not an authentication mechanism. Avoid entering real private student information.
+
+**Manual smoke checks (not yet verified in this environment):** Create a written note and an attached PDF, refresh, edit chapter/topic/body, replace and remove attachments, open/download an attachment, filter each field, switch light/dark mode, check the reader and editor on a mobile viewport, delete a lesson, and check that completion counts update. Confirm behavior with browser storage cleared and when storage is full or disabled. Run `npm ci && npm test && npm run lint && npm run build` in a network-enabled environment.
